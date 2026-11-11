@@ -31,8 +31,7 @@ android {
             )
         }
         jniLibs {
-            useLegacyPackaging = true
-            pickFirsts += setOf("**/*.so")
+            useLegacyPackaging = false
         }
     }
 
