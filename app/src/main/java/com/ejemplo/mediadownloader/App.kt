@@ -1,9 +1,9 @@
 package com.ejemplo.mediadownloader
 
 import android.app.Application
+import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLException
 
 class App : Application() {
     override fun onCreate() {
@@ -11,10 +11,9 @@ class App : Application() {
         try {
             YoutubeDL.getInstance().init(this)
             FFmpeg.getInstance().init(this)
-        } catch (e: YoutubeDLException) {
-            e.printStackTrace()
+            Log.d("MediaDownloader", "YoutubeDL inicializado correctamente")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MediaDownloader", "Error al inicializar YoutubeDL", e)
         }
     }
 }
