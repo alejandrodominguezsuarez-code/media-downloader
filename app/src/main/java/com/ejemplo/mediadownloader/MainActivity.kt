@@ -109,18 +109,21 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Extracción rápida por API nativa para X/Twitter
+                // 1. Extracción rápida para X/Twitter (FxTwitter / VxTwitter)
                 val tweetId = getTweetId(url)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Extracción rápida por API nativa para Instagram (Reels/Posts)
+                // 2. Extracción para Instagram u otras plataformas mediante Cobalt API
                 if (!downloaded && url.contains("instagram.com")) {
-                    downloaded = descargarInstagramNativo(url, tempFile)
+                    downloaded = descargarConCobalt(url, tempFile)
+                    if (!downloaded) {
+                        downloaded = descargarInstagramNativo(url, tempFile)
+                    }
                 }
 
-                // 3. Extractor secundario YoutubeDL (con verificación de estado previa)
+                // 3. Extractor de respaldo YoutubeDL si el motor API falló o es otra web
                 if (!downloaded) {
                     if (initYoutubeDL()) {
                         try {
@@ -148,7 +151,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este enlace", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo (cuenta privada o enlace no soportado)", Toast.LENGTH_LONG).show()
                         if (finishOnComplete) finish()
                     }
                 }
@@ -169,15 +172,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun descargarTwitterNativo(tweetId: String, tempFile: File): Boolean {
         var videoUrl = obtenerUrlFxTwitter(tweetId)
-
         if (videoUrl == null) {
             videoUrl = obtenerUrlVxTwitter(tweetId)
         }
-
-        if (videoUrl != null) {
-            return descargarArchivoDirecto(videoUrl, tempFile)
-        }
-        return false
+        return if (videoUrl != null) descargarArchivoDirecto(videoUrl, tempFile) else false
     }
 
     private fun obtenerUrlFxTwitter(tweetId: String): String? {
@@ -238,6 +236,43 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("MediaDownloader", "VxTwitter falló", e)
             null
+        }
+    }
+
+    private fun descargarConCobalt(targetUrl: String, tempFile: File): Boolean {
+        return try {
+            val apiUrl = "https://co.wuk.sh/api/json"
+            val conn = URL(apiUrl).openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            conn.connectTimeout = 7000
+            conn.readTimeout = 7000
+            conn.doOutput = true
+
+            val jsonBody = JSONObject().apply {
+                put("url", targetUrl)
+                put("vQuality", "720")
+            }
+
+            conn.outputStream.use { os ->
+                os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+            }
+
+            if (conn.responseCode == 200) {
+                val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(responseStr)
+                val status = json.optString("status")
+                if (status == "stream" || status == "redirect") {
+                    val mediaUrl = json.getString("url")
+                    return descargarArchivoDirecto(mediaUrl, tempFile)
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "Cobalt API falló", e)
+            false
         }
     }
 
