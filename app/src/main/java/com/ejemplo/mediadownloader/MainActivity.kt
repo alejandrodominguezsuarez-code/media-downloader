@@ -1,12 +1,16 @@
 package com.ejemplo.mediadownloader
 
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.widget.Button
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -24,6 +28,9 @@ import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var etUrl: EditText
+    private lateinit var btnDownload: Button
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -34,14 +41,28 @@ class MainActivity : AppCompatActivity() {
             sharedText?.let { rawText ->
                 val extractedUrl = extractUrl(rawText)
                 if (extractedUrl != null) {
-                    descargarVideo(extractedUrl)
+                    descargarVideo(extractedUrl, finishOnComplete = true)
                 } else {
                     Toast.makeText(this, "No se encontró un enlace válido", Toast.LENGTH_SHORT).show()
                     finish()
                 }
             } ?: finish()
         } else {
-            finish()
+            setContentView(R.layout.activity_main)
+            etUrl = findViewById(R.id.etUrl)
+            btnDownload = findViewById(R.id.btnDownload)
+
+            comprobarPortapapeles()
+
+            btnDownload.setOnClickListener {
+                val inputUrl = etUrl.text.toString().trim()
+                val extractedUrl = extractUrl(inputUrl)
+                if (extractedUrl != null) {
+                    descargarVideo(extractedUrl, finishOnComplete = false)
+                } else {
+                    Toast.makeText(this, "Introduce o pega una URL válida", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -52,6 +73,19 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    private fun comprobarPortapapeles() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clipData = clipboard?.primaryClip
+        if (clipData != null && clipData.itemCount > 0) {
+            val text = clipData.getItemAt(0).text?.toString() ?: ""
+            val extracted = extractUrl(text)
+            if (extracted != null) {
+                etUrl.setText(extracted)
+                Toast.makeText(this, "Enlace detectado del portapapeles", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun extractUrl(text: String): String? {
         val regex = "(https?://[^\\s]+)".toRegex()
         val rawUrl = regex.find(text)?.value?.trim() ?: return null
@@ -59,7 +93,7 @@ class MainActivity : AppCompatActivity() {
         return cleanUrl.replace("x.com", "twitter.com")
     }
 
-    private fun descargarVideo(url: String) {
+    private fun descargarVideo(url: String, finishOnComplete: Boolean = true) {
         Toast.makeText(applicationContext, "Descargando vídeo...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -67,13 +101,11 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Si es de X (Twitter), procesar mediante extracción API nativa
                 val tweetId = getTweetId(url)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Si no es X o falló la extracción de X, usar YoutubeDL como motor secundario (Instagram, etc.)
                 if (!downloaded && !url.contains("twitter.com")) {
                     val request = YoutubeDLRequest(url).apply {
                         addOption("-o", tempFile.absolutePath)
@@ -91,19 +123,19 @@ class MainActivity : AppCompatActivity() {
 
                     withContext(Dispatchers.Main) {
                         Toast.makeText(applicationContext, "¡Vídeo guardado en Descargas!", Toast.LENGTH_LONG).show()
-                        finish()
+                        if (finishOnComplete) finish()
                     }
                 } else {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este post", Toast.LENGTH_LONG).show()
-                        finish()
+                        if (finishOnComplete) finish()
                     }
                 }
             } catch (e: Exception) {
                 val rawError = e.localizedMessage ?: e.message ?: "Error desconocido"
                 withContext(Dispatchers.Main) {
                     Toast.makeText(applicationContext, "Error: ${rawError.take(60)}", Toast.LENGTH_LONG).show()
-                    finish()
+                    if (finishOnComplete) finish()
                 }
             }
         }
@@ -115,10 +147,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarTwitterNativo(tweetId: String, tempFile: File): Boolean {
-        // Intento 1: API FxTwitter
         var videoUrl = obtenerUrlFxTwitter(tweetId)
 
-        // Intento 2: API VxTwitter (fallback)
         if (videoUrl == null) {
             videoUrl = obtenerUrlVxTwitter(tweetId)
         }
