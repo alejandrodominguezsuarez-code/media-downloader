@@ -53,7 +53,6 @@ class MainActivity : AppCompatActivity() {
         val regex = "(https?://[^\\s]+)".toRegex()
         val rawUrl = regex.find(text)?.value?.trim()
 
-        // Normalizar enlaces x.com a twitter.com para asegurar compatibilidad con extractores
         return rawUrl?.replace("x.com", "twitter.com")
     }
 
@@ -62,11 +61,10 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Actualizar binarios de yt-dlp al canal estable si hay parches de red
                 try {
-                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext, YoutubeDL.UpdateChannel.STABLE)
+                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext)
                 } catch (e: Exception) {
-                    Log.w("MediaDownloader", "No se pudo actualizar el ejecutable de yt-dlp", e)
+                    Log.w("MediaDownloader", "No se pudo actualizar yt-dlp", e)
                 }
 
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
