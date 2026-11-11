@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -15,8 +16,11 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -50,9 +54,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun extractUrl(text: String): String? {
         val regex = "(https?://[^\\s]+)".toRegex()
-        val rawUrl = regex.find(text)?.value?.trim()
-
-        return rawUrl?.replace("x.com", "twitter.com")
+        val rawUrl = regex.find(text)?.value?.trim() ?: return null
+        val cleanUrl = rawUrl.split("?").first()
+        return cleanUrl.replace("x.com", "twitter.com")
     }
 
     private fun descargarVideo(url: String) {
@@ -61,18 +65,26 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
+                var downloaded = false
 
-                val request = YoutubeDLRequest(url).apply {
-                    addOption("-o", tempFile.absolutePath)
-                    addOption("-f", "b/best")
-                    addOption("--no-check-certificate")
-                    addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    addOption("--referer", "https://twitter.com/")
+                // 1. Descarga directa vía API de Twitter (bypassea los fallos de yt-dlp en X)
+                val tweetId = getTweetId(url)
+                if (tweetId != null) {
+                    downloaded = descargarTwitterDirecto(tweetId, tempFile)
                 }
 
-                YoutubeDL.getInstance().execute(request)
+                // 2. Si no es Twitter o falló la API directa, usar YoutubeDL como motor secundario
+                if (!downloaded) {
+                    val request = YoutubeDLRequest(url).apply {
+                        addOption("-o", tempFile.absolutePath)
+                        addOption("-f", "b/best")
+                        addOption("--no-check-certificate")
+                    }
+                    YoutubeDL.getInstance().execute(request)
+                    downloaded = tempFile.exists() && tempFile.length() > 0
+                }
 
-                if (tempFile.exists() && tempFile.length() > 0) {
+                if (downloaded && tempFile.exists() && tempFile.length() > 0) {
                     val fileName = "MediaDownloader_${System.currentTimeMillis()}.mp4"
                     saveToPublicDownloads(tempFile, fileName)
                     tempFile.delete()
@@ -83,23 +95,63 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "Error: El archivo procesado está vacío", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo del post", Toast.LENGTH_LONG).show()
                         finish()
                     }
                 }
             } catch (e: Exception) {
                 val rawError = e.localizedMessage ?: e.message ?: "Error desconocido"
-                val cleanError = if (rawError.contains("Traceback")) {
-                    rawError.lines().lastOrNull { it.isNotBlank() } ?: "Fallo en el extractor de X"
-                } else {
-                    rawError
-                }
-
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "Error: $cleanError", Toast.LENGTH_LONG).show()
+                    Toast.makeText(applicationContext, "Error: ${rawError.take(60)}", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
+        }
+    }
+
+    private fun getTweetId(url: String): String? {
+        val regex = "status/(\\d+)".toRegex()
+        return regex.find(url)?.groupValues?.get(1)
+    }
+
+    private fun descargarTwitterDirecto(tweetId: String, tempFile: File): Boolean {
+        return try {
+            val apiUrl = "https://api.vxtwitter.com/i/status/$tweetId"
+            val conn = URL(apiUrl).openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+
+            if (conn.responseCode == 200) {
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(jsonStr)
+
+                var mediaUrl: String? = null
+                if (json.has("media_urls")) {
+                    val mediaArray = json.getJSONArray("media_urls")
+                    for (i in 0 until mediaArray.length()) {
+                        val mUrl = mediaArray.getString(i)
+                        if (mUrl.contains(".mp4") || mUrl.contains("video.twimg.com")) {
+                            mediaUrl = mUrl
+                            break
+                        }
+                    }
+                }
+
+                if (mediaUrl != null) {
+                    URL(mediaUrl).openStream().use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    return tempFile.exists() && tempFile.length() > 0
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "Fallback vxtwitter falló", e)
+            false
         }
     }
 
