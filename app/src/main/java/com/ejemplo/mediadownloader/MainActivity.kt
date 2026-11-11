@@ -109,21 +109,18 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Extracción rápida para X/Twitter (FxTwitter / VxTwitter)
+                // 1. Extracción nativa para X/Twitter (FxTwitter / VxTwitter)
                 val tweetId = getTweetId(url)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Extracción para Instagram u otras plataformas mediante Cobalt API
+                // 2. Extracción multicascada para Instagram (Reels, Posts, IGTV)
                 if (!downloaded && url.contains("instagram.com")) {
-                    downloaded = descargarConCobalt(url, tempFile)
-                    if (!downloaded) {
-                        downloaded = descargarInstagramNativo(url, tempFile)
-                    }
+                    downloaded = descargarInstagramMulticapa(url, tempFile)
                 }
 
-                // 3. Extractor de respaldo YoutubeDL si el motor API falló o es otra web
+                // 3. Fallback YoutubeDL si el enlace es de otra plataforma o fallaron las APIs
                 if (!downloaded) {
                     if (initYoutubeDL()) {
                         try {
@@ -239,21 +236,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun descargarInstagramMulticapa(instaUrl: String, tempFile: File): Boolean {
+        // Intento 1: API Cobalt
+        if (descargarConCobalt(instaUrl, tempFile)) return true
+
+        // Intento 2: Extractor IxInstagram
+        if (descargarIxInstagram(instaUrl, tempFile)) return true
+
+        // Intento 3: Metaetiquetas OpenGraph (ddinstagram)
+        if (descargarInstagramNativo(instaUrl, tempFile)) return true
+
+        return false
+    }
+
     private fun descargarConCobalt(targetUrl: String, tempFile: File): Boolean {
         return try {
-            val apiUrl = "https://co.wuk.sh/api/json"
+            val apiUrl = "https://api.cobalt.tools/"
             val conn = URL(apiUrl).openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", "application/json")
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
             conn.connectTimeout = 7000
             conn.readTimeout = 7000
             conn.doOutput = true
 
             val jsonBody = JSONObject().apply {
                 put("url", targetUrl)
-                put("vQuality", "720")
+                put("videoQuality", "720")
             }
 
             conn.outputStream.use { os ->
@@ -264,14 +274,44 @@ class MainActivity : AppCompatActivity() {
                 val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(responseStr)
                 val status = json.optString("status")
-                if (status == "stream" || status == "redirect") {
-                    val mediaUrl = json.getString("url")
+                if (status == "stream" || status == "redirect" || status == "picker") {
+                    val mediaUrl = if (status == "picker") {
+                        json.getJSONArray("picker").getJSONObject(0).getString("url")
+                    } else {
+                        json.getString("url")
+                    }
                     return descargarArchivoDirecto(mediaUrl, tempFile)
                 }
             }
             false
         } catch (e: Exception) {
             Log.e("MediaDownloader", "Cobalt API falló", e)
+            false
+        }
+    }
+
+    private fun descargarIxInstagram(url: String, tempFile: File): Boolean {
+        return try {
+            val cleanUrl = url.replace("instagram.com", "ddinstagram.com")
+            val conn = URL(cleanUrl).openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+
+            if (conn.responseCode == 200) {
+                val html = conn.inputStream.bufferedReader().use { it.readText() }
+                val regexVideo = "<meta\\s+property=\"og:video\"\\s+content=\"([^\"]+)\"".toRegex()
+                val match = regexVideo.find(html)
+                val videoUrl = match?.groupValues?.get(1)?.replace("&", "&")
+
+                if (videoUrl != null) {
+                    return descargarArchivoDirecto(videoUrl, tempFile)
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "IxInstagram falló", e)
             false
         }
     }
