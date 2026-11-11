@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -49,8 +50,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun extractUrl(text: String): String? {
-        val regex = "(https?://[\\w-]+(\\.[\\w-]+)+[/#?]?.*)".toRegex()
-        return regex.find(text)?.value?.trim()
+        val regex = "(https?://[^\\s]+)".toRegex()
+        val rawUrl = regex.find(text)?.value?.trim()
+
+        // Normalizar enlaces x.com a twitter.com para asegurar compatibilidad con extractores
+        return rawUrl?.replace("x.com", "twitter.com")
     }
 
     private fun descargarVideo(url: String) {
@@ -58,34 +62,50 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Actualizar motor yt-dlp para soportar cambios en X/Twitter
+                // Actualizar binarios de yt-dlp al canal estable si hay parches de red
                 try {
-                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext)
-                } catch (_: Exception) {}
+                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext, YoutubeDL.UpdateChannel.STABLE)
+                } catch (e: Exception) {
+                    Log.w("MediaDownloader", "No se pudo actualizar el ejecutable de yt-dlp", e)
+                }
 
-                // Archivo temporal en la caché interna de la app
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
 
                 val request = YoutubeDLRequest(url).apply {
                     addOption("-o", tempFile.absolutePath)
-                    addOption("-f", "best")
+                    addOption("-f", "b/best")
+                    addOption("--no-check-certificate")
+                    addOption("--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    addOption("--referer", "https://twitter.com/")
                 }
 
                 YoutubeDL.getInstance().execute(request)
 
-                // Exportar a la carpeta pública de Descargas usando MediaStore
-                val fileName = "MediaDownloader_${System.currentTimeMillis()}.mp4"
-                saveToPublicDownloads(tempFile, fileName)
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    val fileName = "MediaDownloader_${System.currentTimeMillis()}.mp4"
+                    saveToPublicDownloads(tempFile, fileName)
+                    tempFile.delete()
 
-                tempFile.delete()
-
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "¡Vídeo guardado en Descargas!", Toast.LENGTH_LONG).show()
-                    finish()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(applicationContext, "¡Vídeo guardado en Descargas!", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(applicationContext, "Error: El archivo procesado está vacío", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
                 }
             } catch (e: Exception) {
+                val rawError = e.localizedMessage ?: e.message ?: "Error desconocido"
+                val cleanError = if (rawError.contains("Traceback")) {
+                    rawError.lines().lastOrNull { it.isNotBlank() } ?: "Fallo en el extractor de X"
+                } else {
+                    rawError
+                }
+
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(applicationContext, "Error: $cleanError", Toast.LENGTH_LONG).show()
                     finish()
                 }
             }
