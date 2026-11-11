@@ -6,6 +6,7 @@ import android.os.Environment
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Inicialización de respaldo por si el SO destruyó el proceso de la App
+        initYoutubeDL()
+
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
             sharedText?.let { rawText ->
@@ -25,8 +29,18 @@ class MainActivity : AppCompatActivity() {
                     descargarVideo(extractedUrl)
                 } else {
                     Toast.makeText(this, "No se encontró enlace válido", Toast.LENGTH_SHORT).show()
+                    finish()
                 }
             }
+        }
+    }
+
+    private fun initYoutubeDL() {
+        try {
+            YoutubeDL.getInstance().init(applicationContext)
+            FFmpeg.getInstance().init(applicationContext)
+        } catch (_: Exception) {
+            // Ya inicializado previamente
         }
     }
 
@@ -36,7 +50,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarVideo(url: String) {
-        Toast.makeText(this, "Descargando vídeo...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(applicationContext, "Descargando vídeo...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -49,12 +63,12 @@ class MainActivity : AppCompatActivity() {
                 YoutubeDL.getInstance().execute(request)
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "¡Guardado en Descargas!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(applicationContext, "¡Guardado en Descargas!", Toast.LENGTH_LONG).show()
                     finish()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(applicationContext, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 }
             }
         }
