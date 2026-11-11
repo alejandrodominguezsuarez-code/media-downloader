@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
-import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -61,12 +60,6 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                try {
-                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext)
-                } catch (e: Exception) {
-                    Log.w("MediaDownloader", "No se pudo actualizar yt-dlp", e)
-                }
-
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
 
                 val request = YoutubeDLRequest(url).apply {
