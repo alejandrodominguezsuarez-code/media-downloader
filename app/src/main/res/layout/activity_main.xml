@@ -34,11 +34,11 @@
         android:id="@+id/etUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="https://x.com/..."
-        android:textColorHint="#536471"
+        android:hint="https://x.com/... o https://instagram.com/..."
+        android:textColorHint="#8B98A5"
         android:textColor="#FFFFFF"
-        android:background="@android:drawable/editbox_background"
-        android:padding="12dp"
+        android:background="#161E27"
+        android:padding="14dp"
         android:inputType="textUri"
         android:layout_marginBottom="16dp"/>
 
