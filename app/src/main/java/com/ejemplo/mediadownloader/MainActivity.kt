@@ -70,7 +70,9 @@ class MainActivity : AppCompatActivity() {
         try {
             YoutubeDL.getInstance().init(applicationContext)
             FFmpeg.getInstance().init(applicationContext)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w("MediaDownloader", "Inicialización previa de YoutubeDL ignorada: ${e.message}")
+        }
     }
 
     private fun comprobarPortapapeles() {
@@ -90,7 +92,11 @@ class MainActivity : AppCompatActivity() {
         val regex = "(https?://[^\\s]+)".toRegex()
         val rawUrl = regex.find(text)?.value?.trim() ?: return null
         val cleanUrl = rawUrl.split("?").first()
-        return cleanUrl.replace("x.com", "twitter.com")
+        return if (cleanUrl.contains("x.com")) {
+            cleanUrl.replace("x.com", "twitter.com")
+        } else {
+            cleanUrl
+        }
     }
 
     private fun descargarVideo(url: String, finishOnComplete: Boolean = true) {
@@ -101,12 +107,15 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
+                // 1. Extracción rápida por API nativa para X/Twitter
                 val tweetId = getTweetId(url)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
+                // 2. Extractor secundario YoutubeDL para Instagram y resto de plataformas
                 if (!downloaded && !url.contains("twitter.com")) {
+                    initYoutubeDL()
                     val request = YoutubeDLRequest(url).apply {
                         addOption("-o", tempFile.absolutePath)
                         addOption("-f", "b/best")
@@ -127,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este post", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este enlace", Toast.LENGTH_LONG).show()
                         if (finishOnComplete) finish()
                     }
                 }
