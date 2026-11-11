@@ -66,12 +66,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initYoutubeDL() {
-        try {
+    private fun initYoutubeDL(): Boolean {
+        return try {
             YoutubeDL.getInstance().init(applicationContext)
             FFmpeg.getInstance().init(applicationContext)
+            true
         } catch (e: Exception) {
-            Log.w("MediaDownloader", "Inicialización previa de YoutubeDL ignorada: ${e.message}")
+            Log.w("MediaDownloader", "Error al inicializar YoutubeDL: ${e.message}")
+            false
         }
     }
 
@@ -113,16 +115,26 @@ class MainActivity : AppCompatActivity() {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Extractor secundario YoutubeDL para Instagram y resto de plataformas
-                if (!downloaded && !url.contains("twitter.com")) {
-                    initYoutubeDL()
-                    val request = YoutubeDLRequest(url).apply {
-                        addOption("-o", tempFile.absolutePath)
-                        addOption("-f", "b/best")
-                        addOption("--no-check-certificate")
+                // 2. Extracción rápida por API nativa para Instagram (Reels/Posts)
+                if (!downloaded && url.contains("instagram.com")) {
+                    downloaded = descargarInstagramNativo(url, tempFile)
+                }
+
+                // 3. Extractor secundario YoutubeDL (con verificación de estado previa)
+                if (!downloaded) {
+                    if (initYoutubeDL()) {
+                        try {
+                            val request = YoutubeDLRequest(url).apply {
+                                addOption("-o", tempFile.absolutePath)
+                                addOption("-f", "b/best")
+                                addOption("--no-check-certificate")
+                            }
+                            YoutubeDL.getInstance().execute(request)
+                            downloaded = tempFile.exists() && tempFile.length() > 0
+                        } catch (e: Exception) {
+                            Log.e("MediaDownloader", "Fallback YoutubeDL falló: ${e.message}")
+                        }
                     }
-                    YoutubeDL.getInstance().execute(request)
-                    downloaded = tempFile.exists() && tempFile.length() > 0
                 }
 
                 if (downloaded && tempFile.exists() && tempFile.length() > 0) {
@@ -229,9 +241,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun descargarInstagramNativo(url: String, tempFile: File): Boolean {
+        return try {
+            val cleanInstaUrl = url.replace("instagram.com", "ddinstagram.com")
+            val conn = URL(cleanInstaUrl).openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)")
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+
+            if (conn.responseCode == 200) {
+                val html = conn.inputStream.bufferedReader().use { it.readText() }
+                val regexVideo = "<meta\\s+property=\"og:video(?::secure_url)?\"\\s+content=\"([^\"]+)\"".toRegex()
+                val match = regexVideo.find(html)
+                val videoUrl = match?.groupValues?.get(1)?.replace("&", "&")
+
+                if (videoUrl != null) {
+                    return descargarArchivoDirecto(videoUrl, tempFile)
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "Instagram nativo falló", e)
+            false
+        }
+    }
+
     private fun descargarArchivoDirecto(fileUrl: String, tempFile: File): Boolean {
         return try {
             val conn = URL(fileUrl).openConnection() as HttpURLConnection
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
             conn.inputStream.use { input ->
