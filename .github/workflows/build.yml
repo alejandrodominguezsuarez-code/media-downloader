@@ -22,11 +22,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Generar Wrapper de Gradle
-      run: gradle wrapper
+    - name: Generar Wrapper de Gradle compatible (8.7)
+      run: gradle wrapper --gradle-version 8.7
 
     - name: Compilar APK Debug
-      run: ./gradlew assembleDebug
+      run: ./gradlew clean assembleDebug --no-daemon
 
     - name: Renombrar APK
       run: mv app/build/outputs/apk/debug/app-debug.apk MediaDownloader.apk
