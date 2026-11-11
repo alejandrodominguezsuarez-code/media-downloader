@@ -1,9 +1,11 @@
 package com.ejemplo.mediadownloader
 
+import android.content.ContentValues
 import android.content.Intent
-import android.media.MediaScannerConnection
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -14,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -47,7 +50,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun extractUrl(text: String): String? {
         val regex = "(https?://[\\w-]+(\\.[\\w-]+)+[/#?]?.*)".toRegex()
-        return regex.find(text)?.value
+        return regex.find(text)?.value?.trim()
     }
 
     private fun descargarVideo(url: String) {
@@ -55,36 +58,55 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val downloadDir = applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) 
-                    ?: Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                // Actualizar motor yt-dlp para soportar cambios en X/Twitter
+                try {
+                    YoutubeDL.getInstance().updateYoutubeDL(applicationContext)
+                } catch (_: Exception) {}
 
-                if (!downloadDir.exists()) downloadDir.mkdirs()
-
-                val outputFile = File(downloadDir, "video_${System.currentTimeMillis()}.mp4")
+                // Archivo temporal en la caché interna de la app
+                val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
 
                 val request = YoutubeDLRequest(url).apply {
-                    addOption("-o", outputFile.absolutePath)
-                    addOption("-f", "b")
+                    addOption("-o", tempFile.absolutePath)
+                    addOption("-f", "best")
                 }
 
                 YoutubeDL.getInstance().execute(request)
 
-                // Forzar al sistema Android a registrar el archivo en la galería / Google Fotos
-                MediaScannerConnection.scanFile(
-                    applicationContext,
-                    arrayOf(outputFile.absolutePath),
-                    arrayOf("video/mp4"),
-                    null
-                )
+                // Exportar a la carpeta pública de Descargas usando MediaStore
+                val fileName = "MediaDownloader_${System.currentTimeMillis()}.mp4"
+                saveToPublicDownloads(tempFile, fileName)
+
+                tempFile.delete()
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(applicationContext, "¡Vídeo guardado correctamente!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(applicationContext, "¡Vídeo guardado en Descargas!", Toast.LENGTH_LONG).show()
                     finish()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(applicationContext, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                     finish()
+                }
+            }
+        }
+    }
+
+    private fun saveToPublicDownloads(sourceFile: File, fileName: String) {
+        val resolver = contentResolver
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+        }
+
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        uri?.let { destinationUri ->
+            resolver.openOutputStream(destinationUri)?.use { outputStream ->
+                FileInputStream(sourceFile).use { inputStream ->
+                    inputStream.copyTo(outputStream)
                 }
             }
         }
