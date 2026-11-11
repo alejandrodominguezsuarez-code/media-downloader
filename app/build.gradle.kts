@@ -20,8 +20,19 @@ android {
     }
 
     packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "/META-INF/{AL2.0,LGPL2.1}"
+            )
+        }
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += setOf("**/*.so")
         }
     }
 
