@@ -67,14 +67,14 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Descarga directa vía API de Twitter (bypassea los fallos de yt-dlp en X)
+                // 1. Si es de X (Twitter), procesar mediante extracción API nativa
                 val tweetId = getTweetId(url)
                 if (tweetId != null) {
-                    downloaded = descargarTwitterDirecto(tweetId, tempFile)
+                    downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Si no es Twitter o falló la API directa, usar YoutubeDL como motor secundario
-                if (!downloaded) {
+                // 2. Si no es X o falló la extracción de X, usar YoutubeDL como motor secundario (Instagram, etc.)
+                if (!downloaded && !url.contains("twitter.com")) {
                     val request = YoutubeDLRequest(url).apply {
                         addOption("-o", tempFile.absolutePath)
                         addOption("-f", "b/best")
@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo del post", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este post", Toast.LENGTH_LONG).show()
                         finish()
                     }
                 }
@@ -114,43 +114,95 @@ class MainActivity : AppCompatActivity() {
         return regex.find(url)?.groupValues?.get(1)
     }
 
-    private fun descargarTwitterDirecto(tweetId: String, tempFile: File): Boolean {
+    private fun descargarTwitterNativo(tweetId: String, tempFile: File): Boolean {
+        // Intento 1: API FxTwitter
+        var videoUrl = obtenerUrlFxTwitter(tweetId)
+
+        // Intento 2: API VxTwitter (fallback)
+        if (videoUrl == null) {
+            videoUrl = obtenerUrlVxTwitter(tweetId)
+        }
+
+        if (videoUrl != null) {
+            return descargarArchivoDirecto(videoUrl, tempFile)
+        }
+        return false
+    }
+
+    private fun obtenerUrlFxTwitter(tweetId: String): String? {
         return try {
-            val apiUrl = "https://api.vxtwitter.com/i/status/$tweetId"
+            val apiUrl = "https://api.fxtwitter.com/status/$tweetId"
             val conn = URL(apiUrl).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
 
             if (conn.responseCode == 200) {
                 val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(jsonStr)
+                if (json.optInt("code") == 200 && json.has("tweet")) {
+                    val tweet = json.getJSONObject("tweet")
+                    if (tweet.has("media")) {
+                        val media = tweet.getJSONObject("media")
+                        if (media.has("videos")) {
+                            val videos = media.getJSONArray("videos")
+                            if (videos.length() > 0) {
+                                return videos.getJSONObject(0).getString("url")
+                            }
+                        }
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "FxTwitter falló", e)
+            null
+        }
+    }
 
-                var mediaUrl: String? = null
+    private fun obtenerUrlVxTwitter(tweetId: String): String? {
+        return try {
+            val apiUrl = "https://api.vxtwitter.com/status/$tweetId"
+            val conn = URL(apiUrl).openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+
+            if (conn.responseCode == 200) {
+                val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(jsonStr)
                 if (json.has("media_urls")) {
                     val mediaArray = json.getJSONArray("media_urls")
                     for (i in 0 until mediaArray.length()) {
                         val mUrl = mediaArray.getString(i)
                         if (mUrl.contains(".mp4") || mUrl.contains("video.twimg.com")) {
-                            mediaUrl = mUrl
-                            break
+                            return mUrl
                         }
                     }
-                }
-
-                if (mediaUrl != null) {
-                    URL(mediaUrl).openStream().use { input ->
-                        tempFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    return tempFile.exists() && tempFile.length() > 0
                 }
             }
-            false
+            null
         } catch (e: Exception) {
-            Log.e("MediaDownloader", "Fallback vxtwitter falló", e)
+            Log.e("MediaDownloader", "VxTwitter falló", e)
+            null
+        }
+    }
+
+    private fun descargarArchivoDirecto(fileUrl: String, tempFile: File): Boolean {
+        return try {
+            val conn = URL(fileUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            conn.inputStream.use { input ->
+                tempFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            tempFile.exists() && tempFile.length() > 0
+        } catch (e: Exception) {
+            Log.e("MediaDownloader", "Descarga de stream directo falló", e)
             false
         }
     }
