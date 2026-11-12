@@ -25,7 +25,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Pega un enlace de X/Twitter o Instagram"
+        android:text="Pega un enlace de X / Twitter"
         android:textSize="14sp"
         android:textColor="#8B98A5"
         android:layout_marginBottom="24dp"/>
@@ -34,7 +34,7 @@
         android:id="@+id/etUrl"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="https://x.com/... o https://instagram.com/..."
+        android:hint="https://x.com/..."
         android:textColorHint="#8B98A5"
         android:textColor="#FFFFFF"
         android:background="#161E27"
