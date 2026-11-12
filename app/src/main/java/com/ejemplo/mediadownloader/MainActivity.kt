@@ -93,6 +93,8 @@ class MainActivity : AppCompatActivity() {
     private fun extractUrl(text: String): String? {
         val regex = "(https?://[^\\s]+)".toRegex()
         val rawUrl = regex.find(text)?.value?.trim() ?: return null
+        
+        // Limpiar parámetros de rastreo y asegurar formato base
         val cleanUrl = rawUrl.split("?").first()
         return if (cleanUrl.contains("x.com")) {
             cleanUrl.replace("x.com", "twitter.com")
@@ -101,30 +103,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun resolveShortUrl(url: String): String {
+        if (!url.contains("t.co/")) return url
+        return try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.requestMethod = "HEAD"
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+            val location = conn.getHeaderField("Location")
+            location ?: url
+        } catch (e: Exception) {
+            url
+        }
+    }
+
     private fun descargarVideo(url: String, finishOnComplete: Boolean = true) {
         Toast.makeText(applicationContext, "Descargando vídeo...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                val resolvedUrl = resolveShortUrl(url)
+                val cleanUrl = resolvedUrl.split("?").first().replace("x.com", "twitter.com")
+
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Extracción nativa para X/Twitter (FxTwitter / VxTwitter)
-                val tweetId = getTweetId(url)
+                // 1. Extracción nativa para X/Twitter
+                val tweetId = getTweetId(cleanUrl)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Extracción multicascada para Instagram (Reels, Posts, IGTV)
-                if (!downloaded && url.contains("instagram.com")) {
-                    downloaded = descargarInstagramMulticapa(url, tempFile)
+                // 2. Extracción multicascada para Instagram (Reels y Posts públicos)
+                if (!downloaded && cleanUrl.contains("instagram.com")) {
+                    downloaded = descargarInstagramMulticapa(cleanUrl, tempFile)
                 }
 
-                // 3. Fallback YoutubeDL si el enlace es de otra plataforma o fallaron las APIs
+                // 3. Fallback YoutubeDL
                 if (!downloaded) {
                     if (initYoutubeDL()) {
                         try {
-                            val request = YoutubeDLRequest(url).apply {
+                            val request = YoutubeDLRequest(cleanUrl).apply {
                                 addOption("-o", tempFile.absolutePath)
                                 addOption("-f", "b/best")
                                 addOption("--no-check-certificate")
@@ -237,15 +258,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarInstagramMulticapa(instaUrl: String, tempFile: File): Boolean {
-        // Intento 1: API Cobalt
         if (descargarConCobalt(instaUrl, tempFile)) return true
-
-        // Intento 2: Extractor IxInstagram
         if (descargarIxInstagram(instaUrl, tempFile)) return true
-
-        // Intento 3: Metaetiquetas OpenGraph (ddinstagram)
         if (descargarInstagramNativo(instaUrl, tempFile)) return true
-
         return false
     }
 
