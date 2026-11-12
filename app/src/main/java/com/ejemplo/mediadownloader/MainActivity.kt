@@ -14,9 +14,6 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,8 +31,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        initYoutubeDL()
-
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
             sharedText?.let { rawText ->
@@ -43,7 +38,7 @@ class MainActivity : AppCompatActivity() {
                 if (extractedUrl != null) {
                     descargarVideo(extractedUrl, finishOnComplete = true)
                 } else {
-                    Toast.makeText(this, "No se encontró un enlace válido", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "No se encontró un enlace de X válido", Toast.LENGTH_SHORT).show()
                     finish()
                 }
             } ?: finish()
@@ -60,20 +55,9 @@ class MainActivity : AppCompatActivity() {
                 if (extractedUrl != null) {
                     descargarVideo(extractedUrl, finishOnComplete = false)
                 } else {
-                    Toast.makeText(this, "Introduce o pega una URL válida", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Introduce o pega una URL de X válida", Toast.LENGTH_SHORT).show()
                 }
             }
-        }
-    }
-
-    private fun initYoutubeDL(): Boolean {
-        return try {
-            YoutubeDL.getInstance().init(applicationContext)
-            FFmpeg.getInstance().init(applicationContext)
-            true
-        } catch (e: Exception) {
-            Log.w("MediaDownloader", "Error al inicializar YoutubeDL: ${e.message}")
-            false
         }
     }
 
@@ -85,22 +69,14 @@ class MainActivity : AppCompatActivity() {
             val extracted = extractUrl(text)
             if (extracted != null) {
                 etUrl.setText(extracted)
-                Toast.makeText(this, "Enlace detectado del portapapeles", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Enlace de X detectado del portapapeles", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun extractUrl(text: String): String? {
         val regex = "(https?://[^\\s]+)".toRegex()
-        val rawUrl = regex.find(text)?.value?.trim() ?: return null
-        
-        // Limpiar parámetros de rastreo y asegurar formato base
-        val cleanUrl = rawUrl.split("?").first()
-        return if (cleanUrl.contains("x.com")) {
-            cleanUrl.replace("x.com", "twitter.com")
-        } else {
-            cleanUrl
-        }
+        return regex.find(text)?.value?.trim()
     }
 
     private fun resolveShortUrl(url: String): String {
@@ -120,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarVideo(url: String, finishOnComplete: Boolean = true) {
-        Toast.makeText(applicationContext, "Descargando vídeo...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(applicationContext, "Descargando vídeo de X...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -130,46 +106,23 @@ class MainActivity : AppCompatActivity() {
                 val tempFile = File(cacheDir, "temp_video_${System.currentTimeMillis()}.mp4")
                 var downloaded = false
 
-                // 1. Extracción nativa para X/Twitter
                 val tweetId = getTweetId(cleanUrl)
                 if (tweetId != null) {
                     downloaded = descargarTwitterNativo(tweetId, tempFile)
                 }
 
-                // 2. Extracción multicascada para Instagram (Reels y Posts públicos)
-                if (!downloaded && cleanUrl.contains("instagram.com")) {
-                    downloaded = descargarInstagramMulticapa(cleanUrl, tempFile)
-                }
-
-                // 3. Fallback YoutubeDL
-                if (!downloaded) {
-                    if (initYoutubeDL()) {
-                        try {
-                            val request = YoutubeDLRequest(cleanUrl).apply {
-                                addOption("-o", tempFile.absolutePath)
-                                addOption("-f", "b/best")
-                                addOption("--no-check-certificate")
-                            }
-                            YoutubeDL.getInstance().execute(request)
-                            downloaded = tempFile.exists() && tempFile.length() > 0
-                        } catch (e: Exception) {
-                            Log.e("MediaDownloader", "Fallback YoutubeDL falló: ${e.message}")
-                        }
-                    }
-                }
-
                 if (downloaded && tempFile.exists() && tempFile.length() > 0) {
-                    val fileName = "MediaDownloader_${System.currentTimeMillis()}.mp4"
+                    val fileName = "X_Download_${System.currentTimeMillis()}.mp4"
                     saveToPublicDownloads(tempFile, fileName)
                     tempFile.delete()
 
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "¡Vídeo guardado en Descargas!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "¡Vídeo de X guardado en Descargas!", Toast.LENGTH_LONG).show()
                         if (finishOnComplete) finish()
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo (cuenta privada o enlace no soportado)", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "No se pudo extraer el vídeo de este tuit", Toast.LENGTH_LONG).show()
                         if (finishOnComplete) finish()
                     }
                 }
@@ -254,106 +207,6 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("MediaDownloader", "VxTwitter falló", e)
             null
-        }
-    }
-
-    private fun descargarInstagramMulticapa(instaUrl: String, tempFile: File): Boolean {
-        if (descargarConCobalt(instaUrl, tempFile)) return true
-        if (descargarIxInstagram(instaUrl, tempFile)) return true
-        if (descargarInstagramNativo(instaUrl, tempFile)) return true
-        return false
-    }
-
-    private fun descargarConCobalt(targetUrl: String, tempFile: File): Boolean {
-        return try {
-            val apiUrl = "https://api.cobalt.tools/"
-            val conn = URL(apiUrl).openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Accept", "application/json")
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-            conn.connectTimeout = 7000
-            conn.readTimeout = 7000
-            conn.doOutput = true
-
-            val jsonBody = JSONObject().apply {
-                put("url", targetUrl)
-                put("videoQuality", "720")
-            }
-
-            conn.outputStream.use { os ->
-                os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
-            }
-
-            if (conn.responseCode == 200) {
-                val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(responseStr)
-                val status = json.optString("status")
-                if (status == "stream" || status == "redirect" || status == "picker") {
-                    val mediaUrl = if (status == "picker") {
-                        json.getJSONArray("picker").getJSONObject(0).getString("url")
-                    } else {
-                        json.getString("url")
-                    }
-                    return descargarArchivoDirecto(mediaUrl, tempFile)
-                }
-            }
-            false
-        } catch (e: Exception) {
-            Log.e("MediaDownloader", "Cobalt API falló", e)
-            false
-        }
-    }
-
-    private fun descargarIxInstagram(url: String, tempFile: File): Boolean {
-        return try {
-            val cleanUrl = url.replace("instagram.com", "ddinstagram.com")
-            val conn = URL(cleanUrl).openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
-
-            if (conn.responseCode == 200) {
-                val html = conn.inputStream.bufferedReader().use { it.readText() }
-                val regexVideo = "<meta\\s+property=\"og:video\"\\s+content=\"([^\"]+)\"".toRegex()
-                val match = regexVideo.find(html)
-                val videoUrl = match?.groupValues?.get(1)?.replace("&", "&")
-
-                if (videoUrl != null) {
-                    return descargarArchivoDirecto(videoUrl, tempFile)
-                }
-            }
-            false
-        } catch (e: Exception) {
-            Log.e("MediaDownloader", "IxInstagram falló", e)
-            false
-        }
-    }
-
-    private fun descargarInstagramNativo(url: String, tempFile: File): Boolean {
-        return try {
-            val cleanInstaUrl = url.replace("instagram.com", "ddinstagram.com")
-            val conn = URL(cleanInstaUrl).openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)")
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
-
-            if (conn.responseCode == 200) {
-                val html = conn.inputStream.bufferedReader().use { it.readText() }
-                val regexVideo = "<meta\\s+property=\"og:video(?::secure_url)?\"\\s+content=\"([^\"]+)\"".toRegex()
-                val match = regexVideo.find(html)
-                val videoUrl = match?.groupValues?.get(1)?.replace("&", "&")
-
-                if (videoUrl != null) {
-                    return descargarArchivoDirecto(videoUrl, tempFile)
-                }
-            }
-            false
-        } catch (e: Exception) {
-            Log.e("MediaDownloader", "Instagram nativo falló", e)
-            false
         }
     }
 
